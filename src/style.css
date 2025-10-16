@@ -1,5 +1,7 @@
-.icon {
-  width: 64px;
-  vertical-align: top;
-  border: 1px solid salmon;
+#main-canvas {
+  display: block;
+  margin: 40px auto;
+  border: 1px solid #000;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
 }
