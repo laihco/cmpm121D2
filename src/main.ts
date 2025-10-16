@@ -19,12 +19,13 @@ ctx.lineWidth = 4;
 ctx.lineCap = "round";
 ctx.strokeStyle = "#ff0000";
 
-// ─── Drawing Data ───────────────────────────────────────
+// ─── Drawing Data ────────────────────────────────────────────────
 type Point = { x: number; y: number };
 let strokes: Point[][] = [];
+let redoStack: Point[][] = [];
 let currentStroke: Point[] | null = null;
 
-// ─── Redraw on demand ──────────────────────────
+// ─── Redraw + Event System ───────────────────────────────────────
 function redraw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = "#ffffffff";
@@ -43,15 +44,15 @@ function redraw() {
 
 canvas.addEventListener("drawing-changed", redraw);
 
-// ─── Emit change event helper ────────────────────────────────────
 function notifyChange() {
   canvas.dispatchEvent(new Event("drawing-changed"));
 }
 
-// ─── Input Handling (record points; notify after each) ───────────
+// ─── Input Handling ──────────────────────────────────────────────
 canvas.addEventListener("mousedown", (e) => {
   currentStroke = [];
   strokes.push(currentStroke);
+  redoStack = []; // clear redo on new stroke
   currentStroke.push({ x: e.offsetX, y: e.offsetY });
   notifyChange();
 });
@@ -70,16 +71,36 @@ canvas.addEventListener("mouseleave", () => {
   currentStroke = null;
 });
 
-// ─── Clear Button ────────────────────────────────────────────────
+// ─── Clear / Undo / Redo Buttons ─────────────────────────────────
 const clearBtn = document.createElement("button");
-clearBtn.id = "clear-canvas-button";
 clearBtn.textContent = "Clear Canvas";
 clearBtn.addEventListener("click", () => {
   strokes = [];
+  redoStack = [];
   currentStroke = null;
   notifyChange();
 });
 container.appendChild(clearBtn);
 
-// ─── Initial paint ───────────────────────────────────────────────
+const undoBtn = document.createElement("button");
+undoBtn.textContent = "Undo";
+undoBtn.addEventListener("click", () => {
+  if (strokes.length === 0) return;
+  const stroke = strokes.pop()!;
+  redoStack.push(stroke);
+  notifyChange();
+});
+container.appendChild(undoBtn);
+
+const redoBtn = document.createElement("button");
+redoBtn.textContent = "Redo";
+redoBtn.addEventListener("click", () => {
+  if (redoStack.length === 0) return;
+  const stroke = redoStack.pop()!;
+  strokes.push(stroke);
+  notifyChange();
+});
+container.appendChild(redoBtn);
+
+// ─── Initial Draw ────────────────────────────────────────────────
 notifyChange();
