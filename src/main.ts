@@ -26,13 +26,11 @@ container.appendChild(toolbar);
 // Selected tool state (line thickness in px)
 let selectedThickness = 2;
 
-// Button interactions
 function selectTool(thickness: number, btn: HTMLButtonElement) {
   selectedThickness = thickness;
   thinBtn.classList.toggle("selectedTool", btn === thinBtn);
   thickBtn.classList.toggle("selectedTool", btn === thickBtn);
 }
-
 thinBtn.addEventListener("click", () => selectTool(2, thinBtn));
 thickBtn.addEventListener("click", () => selectTool(8, thickBtn));
 
@@ -76,37 +74,81 @@ class Stroke implements Drawable {
   }
 }
 
-// Display list + redo
+// ─── Tool Preview ───────────────────────────────────────
+interface Preview {
+  draw(ctx: CanvasRenderingContext2D): void;
+}
+
+class CirclePreview implements Preview {
+  constructor(public x: number, public y: number, public radius: number) {}
+  draw(ctx: CanvasRenderingContext2D) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "#666"; // subtle ring
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+let preview: Preview | null = null;
+
 let displayList: Drawable[] = [];
 let redoStack: Drawable[] = [];
 let currentStroke: Stroke | null = null;
 
 // ─── Redraw + Event System ───────────────────────────────────────
-function redraw() {
+function renderAll() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = "#ffffffff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   for (const item of displayList) item.display(ctx);
+  if (!currentStroke && preview) preview.draw(ctx);
 }
-canvas.addEventListener("drawing-changed", redraw);
+
+canvas.addEventListener("drawing-changed", renderAll);
+canvas.addEventListener("tool-moved", renderAll);
+
 function notifyChange() {
   canvas.dispatchEvent(new Event("drawing-changed"));
+}
+function notifyToolMoved() {
+  canvas.dispatchEvent(new Event("tool-moved"));
 }
 
 // ─── Input Handling ──────────────────────────────────────────────
 canvas.addEventListener("mousedown", (e) => {
+  // Hide preview while drawing, start a stroke
+  preview = null;
   currentStroke = new Stroke(selectedThickness, { x: e.offsetX, y: e.offsetY });
   displayList.push(currentStroke);
   redoStack = []; // clear redo on new stroke
   notifyChange();
 });
+
 canvas.addEventListener("mousemove", (e) => {
-  if (!currentStroke) return;
-  currentStroke.drag(e.offsetX, e.offsetY);
-  notifyChange();
+  if (currentStroke) {
+    // Continue the stroke
+    currentStroke.drag(e.offsetX, e.offsetY);
+    notifyChange();
+  } else {
+    // Update preview (radius is half of selected thickness for a circle marker tip)
+    preview = new CirclePreview(e.offsetX, e.offsetY, selectedThickness / 2);
+    notifyToolMoved();
+  }
 });
-canvas.addEventListener("mouseup", () => (currentStroke = null));
-canvas.addEventListener("mouseleave", () => (currentStroke = null));
+
+canvas.addEventListener("mouseup", () => {
+  currentStroke = null;
+  notifyToolMoved(); // show preview again at last mouse position if it moves
+});
+
+canvas.addEventListener("mouseleave", () => {
+  currentStroke = null;
+  preview = null; // hide preview when pointer leaves canvas
+  notifyToolMoved();
+});
 
 // ─── Clear / Undo / Redo Buttons ─────────────────────────────────
 const actions = document.createElement("div");
@@ -118,8 +160,10 @@ clearBtn.addEventListener("click", () => {
   displayList = [];
   redoStack = [];
   currentStroke = null;
+  preview = null;
   notifyChange();
 });
+actions.appendChild(clearBtn);
 
 const undoBtn = document.createElement("button");
 undoBtn.textContent = "Undo";
@@ -129,6 +173,7 @@ undoBtn.addEventListener("click", () => {
   redoStack.push(cmd);
   notifyChange();
 });
+actions.appendChild(undoBtn);
 
 const redoBtn = document.createElement("button");
 redoBtn.textContent = "Redo";
@@ -138,10 +183,8 @@ redoBtn.addEventListener("click", () => {
   displayList.push(cmd);
   notifyChange();
 });
-
-actions.appendChild(clearBtn);
-actions.appendChild(undoBtn);
 actions.appendChild(redoBtn);
+
 container.appendChild(actions);
 
 // ─── Initial Draw ────────────────────────────────────────────────
