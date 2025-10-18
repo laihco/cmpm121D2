@@ -23,16 +23,50 @@ toolbar.appendChild(thinBtn);
 toolbar.appendChild(thickBtn);
 container.appendChild(toolbar);
 
-// Selected tool state (line thickness in px)
-let selectedThickness = 2;
+// ─── Sticker Buttons ─────────────────────────────────────────────
+const stickerbar = document.createElement("div");
+stickerbar.id = "stickerbar";
 
-function selectTool(thickness: number, btn: HTMLButtonElement) {
-  selectedThickness = thickness;
+const stickers = ["⭐", "🌸", "🎈"];
+const stickerBtns: HTMLButtonElement[] = stickers.map((emoji) => {
+  const b = document.createElement("button");
+  b.className = "tool-button";
+  b.textContent = emoji;
+  stickerbar.appendChild(b);
+  return b;
+});
+
+toolbar.appendChild(stickerbar);
+
+// ─── Tool State ──────────────────────────────────────────────────
+type Tool =
+  | { kind: "marker"; thickness: number }
+  | { kind: "sticker"; emoji: string };
+
+let tool: Tool = { kind: "marker", thickness: 2 };
+
+function selectMarker(thickness: number, btn: HTMLButtonElement) {
+  tool = { kind: "marker", thickness };
   thinBtn.classList.toggle("selectedTool", btn === thinBtn);
   thickBtn.classList.toggle("selectedTool", btn === thickBtn);
+  stickerBtns.forEach((b) => b.classList.remove("selectedTool"));
+  preview = null;
+  notifyToolMoved();
 }
-thinBtn.addEventListener("click", () => selectTool(2, thinBtn));
-thickBtn.addEventListener("click", () => selectTool(8, thickBtn));
+
+thinBtn.addEventListener("click", () => selectMarker(2, thinBtn));
+thickBtn.addEventListener("click", () => selectMarker(8, thickBtn));
+
+stickerBtns.forEach((btn, i) => {
+  btn.addEventListener("click", () => {
+    tool = { kind: "sticker", emoji: stickers[i] };
+    thinBtn.classList.remove("selectedTool");
+    thickBtn.classList.remove("selectedTool");
+    stickerBtns.forEach((b) => b.classList.toggle("selectedTool", b === btn));
+    // fire tool-moved per spec (and allow a preview to appear on next move)
+    notifyToolMoved();
+  });
+});
 
 // ─── Canvas Setup ────────────────────────────────────────────────
 const canvas = document.createElement("canvas");
@@ -74,7 +108,33 @@ class Stroke implements Drawable {
   }
 }
 
-// ─── Tool Preview ───────────────────────────────────────
+// ─── Sticker Commands ────────────────────────────────────────────
+class Sticker implements Drawable {
+  constructor(
+    public x: number,
+    public y: number,
+    public emoji: string,
+    public size = 32,
+    public angle = 0,
+  ) {}
+  drag(x: number, y: number) {
+    this.x = x;
+    this.y = y; // reposition, not a path
+  }
+  display(ctx: CanvasRenderingContext2D) {
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    if (this.angle) ctx.rotate(this.angle);
+    ctx.font =
+      `${this.size}px system-ui, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(this.emoji, 0, 0);
+    ctx.restore();
+  }
+}
+
+// ─── Tool Preview ────────────────────────────────────────────────
 interface Preview {
   draw(ctx: CanvasRenderingContext2D): void;
 }
@@ -92,11 +152,32 @@ class CirclePreview implements Preview {
   }
 }
 
+class StickerPreview implements Preview {
+  constructor(
+    public x: number,
+    public y: number,
+    public emoji: string,
+    public size = 32,
+  ) {}
+  draw(ctx: CanvasRenderingContext2D) {
+    ctx.save();
+    ctx.globalAlpha = 0.6;
+    ctx.font =
+      `${this.size}px system-ui, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(this.emoji, this.x, this.y);
+    ctx.restore();
+  }
+}
+
 let preview: Preview | null = null;
 
+// ─── Display List / Undo-Redo State ──────────────────────────────
 let displayList: Drawable[] = [];
 let redoStack: Drawable[] = [];
 let currentStroke: Stroke | null = null;
+let currentSticker: Sticker | null = null;
 
 // ─── Redraw + Event System ───────────────────────────────────────
 function renderAll() {
@@ -104,7 +185,7 @@ function renderAll() {
   ctx.fillStyle = "#ffffffff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   for (const item of displayList) item.display(ctx);
-  if (!currentStroke && preview) preview.draw(ctx);
+  if (!currentStroke && !currentSticker && preview) preview.draw(ctx);
 }
 
 canvas.addEventListener("drawing-changed", renderAll);
@@ -119,33 +200,47 @@ function notifyToolMoved() {
 
 // ─── Input Handling ──────────────────────────────────────────────
 canvas.addEventListener("mousedown", (e) => {
-  // Hide preview while drawing, start a stroke
-  preview = null;
-  currentStroke = new Stroke(selectedThickness, { x: e.offsetX, y: e.offsetY });
-  displayList.push(currentStroke);
-  redoStack = []; // clear redo on new stroke
-  notifyChange();
+  preview = null; // hide preview while drawing/placing
+  if (tool.kind === "marker") {
+    currentStroke = new Stroke(tool.thickness, { x: e.offsetX, y: e.offsetY });
+    displayList.push(currentStroke);
+    redoStack = [];
+    notifyChange();
+  } else {
+    currentSticker = new Sticker(e.offsetX, e.offsetY, tool.emoji, 32);
+    displayList.push(currentSticker);
+    redoStack = [];
+    notifyChange();
+  }
 });
 
 canvas.addEventListener("mousemove", (e) => {
   if (currentStroke) {
-    // Continue the stroke
     currentStroke.drag(e.offsetX, e.offsetY);
     notifyChange();
+  } else if (currentSticker) {
+    currentSticker.drag(e.offsetX, e.offsetY);
+    notifyChange();
   } else {
-    // Update preview (radius is half of selected thickness for a circle marker tip)
-    preview = new CirclePreview(e.offsetX, e.offsetY, selectedThickness / 2);
+    // Update preview for current tool
+    if (tool.kind === "marker") {
+      preview = new CirclePreview(e.offsetX, e.offsetY, tool.thickness / 2);
+    } else {
+      preview = new StickerPreview(e.offsetX, e.offsetY, tool.emoji, 32);
+    }
     notifyToolMoved();
   }
 });
 
 canvas.addEventListener("mouseup", () => {
   currentStroke = null;
-  notifyToolMoved(); // show preview again at last mouse position if it moves
+  currentSticker = null;
+  // preview resumes on next move
 });
 
 canvas.addEventListener("mouseleave", () => {
   currentStroke = null;
+  currentSticker = null;
   preview = null; // hide preview when pointer leaves canvas
   notifyToolMoved();
 });
@@ -160,6 +255,7 @@ clearBtn.addEventListener("click", () => {
   displayList = [];
   redoStack = [];
   currentStroke = null;
+  currentSticker = null;
   preview = null;
   notifyChange();
 });
