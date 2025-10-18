@@ -6,16 +6,30 @@
   margin-top: 24px;
 }
 
+#toolbar, #actions {
+  display: flex;
+  gap: 8px;
+}
+
+.tool-button,
+#actions > button {
+  padding: 6px 10px;
+  font: 600 14px system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.selectedTool {
+  outline: 2px solid #4f46e5; /* subtle selection cue */
+  outline-offset: 2px;
+}
+
 #main-canvas {
   display: block;
-  margin: 0 auto;
   border: 1px solid #000;
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-}
-
-#clear-canvas-button {
-  padding: 8px 12px;
-  font: 600 14px system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  cursor: pointer;
+  touch-action: none;
 }
