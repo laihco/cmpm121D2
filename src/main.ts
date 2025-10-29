@@ -103,13 +103,45 @@ thickBtn.addEventListener("click", () => selectMarker(8, thickBtn));
 // ─── Canvas Setup ────────────────────────────────────────────────
 const canvas = document.createElement("canvas");
 canvas.id = "main-canvas";
-canvas.width = 256;
-canvas.height = 256;
+canvas.width = 512; // bigger drawing area
+canvas.height = 512;
 container.appendChild(canvas);
 
 const ctx = canvas.getContext("2d")!;
 ctx.lineCap = "round";
-ctx.strokeStyle = "#ff0000";
+
+// ─── Color Palette ───────────────────────────────────────────────
+const colorbar = document.createElement("div");
+colorbar.id = "colorbar";
+
+const colors = [
+  "#ff0000",
+  "#00aaff",
+  "#00cc66",
+  "#ffcc00",
+  "#ff66ff",
+  "#000000",
+];
+let currentColor = colors[0];
+
+colors.forEach((c) => {
+  const swatch = document.createElement("button");
+  swatch.className = "color-swatch";
+  swatch.style.backgroundColor = c;
+  if (c === currentColor) swatch.classList.add("selectedColor");
+  swatch.addEventListener("click", () => {
+    currentColor = c;
+    ctx.strokeStyle = c;
+    document
+      .querySelectorAll(".color-swatch")
+      .forEach((b) => b.classList.remove("selectedColor"));
+    swatch.classList.add("selectedColor");
+  });
+  colorbar.appendChild(swatch);
+});
+
+container.appendChild(colorbar);
+ctx.strokeStyle = currentColor;
 
 // ─── Drawing Commands ────────────────────────────────────────────
 type Point = { x: number; y: number };
@@ -314,6 +346,35 @@ redoBtn.addEventListener("click", () => {
 actions.appendChild(redoBtn);
 
 container.appendChild(actions);
+
+// ─── High-Res Export ────────────────────────────
+function exportHiResPNG() {
+  const exportCanvas = document.createElement("canvas");
+  exportCanvas.width = 1024;
+  exportCanvas.height = 1024;
+
+  const ex = exportCanvas.getContext("2d")!;
+  ex.lineCap = "round";
+  ex.strokeStyle = "#ff0000";
+  ex.fillStyle = "#ffffffff";
+  ex.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+
+  ex.scale(4, 4);
+
+  // Replay only the committed items (no previews)
+  for (const item of displayList) item.display(ex);
+
+  // Trigger download
+  const anchor = document.createElement("a");
+  anchor.href = exportCanvas.toDataURL("image/png");
+  anchor.download = "sketchpad.png";
+  anchor.click();
+}
+
+const exportBtn = document.createElement("button");
+exportBtn.textContent = "Export PNG";
+exportBtn.addEventListener("click", exportHiResPNG);
+actions.appendChild(exportBtn);
 
 // ─── Initial Draw ────────────────────────────────────────────────
 notifyChange();
