@@ -5,7 +5,27 @@ document.title = "रंगोली";
 
 const container = document.createElement("div");
 container.id = "canvas-container";
+container.classList.add("app"); // ← retro app grid
 document.body.appendChild(container);
+
+// Create left sidebar + right stage regions
+const sidebar = document.createElement("aside");
+sidebar.id = "sidebar";
+const stage = document.createElement("div");
+stage.id = "stage";
+container.appendChild(sidebar);
+container.appendChild(stage);
+
+// Helper to make retro "group" panels
+function makeGroup(title: string) {
+  const group = document.createElement("div");
+  group.className = "group";
+  const t = document.createElement("div");
+  t.className = "group-title";
+  t.textContent = title;
+  group.appendChild(t);
+  return { group, body: group };
+}
 
 // ─── Tool Buttons (Thin / Thick) ─────────────────────────────────
 const toolbar = document.createElement("div");
@@ -21,15 +41,17 @@ thickBtn.textContent = "Thick";
 
 toolbar.appendChild(thinBtn);
 toolbar.appendChild(thickBtn);
-container.appendChild(toolbar);
+
+// Wrap Tools in a sidebar group
+const toolsPanel = makeGroup("Tools");
+toolsPanel.body.appendChild(toolbar);
+sidebar.appendChild(toolsPanel.group);
 
 // ─── Sticker Bar (Data-driven) ───────────────────────────────────
 const stickerbar = document.createElement("div");
 stickerbar.id = "stickerbar";
-toolbar.appendChild(stickerbar);
 
-let stickers: string[] = ["⭐", "🌸", "🎈"];
-
+let stickers: string[] = ["🌸", "⭐", "🪄", "🌿", "💠", "🎈"]; // retro-ish starter set
 let stickerBtns: HTMLButtonElement[] = [];
 
 function renderStickerbar() {
@@ -67,6 +89,11 @@ function renderStickerbar() {
 }
 renderStickerbar();
 
+// Wrap Stickers in a sidebar group
+const stickersPanel = makeGroup("Stickers");
+stickersPanel.body.appendChild(stickerbar);
+sidebar.appendChild(stickersPanel.group);
+
 // ─── Tool State ──────────────────────────────────────────────────
 type Tool =
   | { kind: "marker"; thickness: number }
@@ -97,30 +124,43 @@ function selectSticker(emoji: string, btn: HTMLButtonElement) {
   notifyToolMoved();
 }
 
-thinBtn.addEventListener("click", () => selectMarker(2, thinBtn));
-thickBtn.addEventListener("click", () => selectMarker(8, thickBtn));
+thinBtn.addEventListener("click", () => selectMarker(4, thinBtn)); // tuned default
+thickBtn.addEventListener("click", () => selectMarker(14, thickBtn)); // tuned default
 
-// ─── Canvas Setup ────────────────────────────────────────────────
+// ─── Canvas Setup (goes into the stage on the right) ─────────────
 const canvas = document.createElement("canvas");
 canvas.id = "main-canvas";
 canvas.width = 512; // bigger drawing area
 canvas.height = 512;
-container.appendChild(canvas);
+stage.appendChild(canvas);
 
 const ctx = canvas.getContext("2d")!;
 ctx.lineCap = "round";
 
-// ─── Color Palette ───────────────────────────────────────────────
+// ─── Color Palette (square swatches) ─────────────────────────────
 const colorbar = document.createElement("div");
 colorbar.id = "colorbar";
 
+// A retro-leaning palette
 const colors = [
-  "#ff0000",
-  "#00aaff",
-  "#00cc66",
-  "#ffcc00",
-  "#ff66ff",
   "#000000",
+  "#7f7f7f",
+  "#ffffff",
+  "#ff0000",
+  "#800000",
+  "#ffff00",
+  "#808000",
+  "#00ff00",
+  "#008000",
+  "#00ffff",
+  "#008080",
+  "#0000ff",
+  "#000080",
+  "#ff00ff",
+  "#800080",
+  "#ffa500",
+  "#804000",
+  "#a52a2a",
 ];
 let currentColor = colors[0];
 
@@ -131,7 +171,7 @@ colors.forEach((c) => {
   if (c === currentColor) swatch.classList.add("selectedColor");
   swatch.addEventListener("click", () => {
     currentColor = c;
-    ctx.strokeStyle = c;
+    ctx.strokeStyle = c; // global style (old strokes recolor — same as your current behavior)
     document
       .querySelectorAll(".color-swatch")
       .forEach((b) => b.classList.remove("selectedColor"));
@@ -140,7 +180,11 @@ colors.forEach((c) => {
   colorbar.appendChild(swatch);
 });
 
-container.appendChild(colorbar);
+// Wrap Colors in a sidebar group
+const colorsPanel = makeGroup("Colors");
+colorsPanel.body.appendChild(colorbar);
+sidebar.appendChild(colorsPanel.group);
+
 ctx.strokeStyle = currentColor;
 
 // ─── Drawing Commands ────────────────────────────────────────────
@@ -178,7 +222,7 @@ class Sticker implements Drawable {
     public x: number,
     public y: number,
     public emoji: string,
-    public size = 32,
+    public size = Math.round(canvas.width * 0.085), // scale with canvas for nicer feel
     public angle = 0,
   ) {}
   drag(x: number, y: number) {
@@ -221,7 +265,7 @@ class StickerPreview implements Preview {
     public x: number,
     public y: number,
     public emoji: string,
-    public size = 32,
+    public size = Math.round(canvas.width * 0.085),
   ) {}
   draw(ctx: CanvasRenderingContext2D) {
     ctx.save();
@@ -271,7 +315,7 @@ canvas.addEventListener("mousedown", (e) => {
     redoStack = [];
     notifyChange();
   } else {
-    currentSticker = new Sticker(e.offsetX, e.offsetY, tool.emoji, 32);
+    currentSticker = new Sticker(e.offsetX, e.offsetY, tool.emoji);
     displayList.push(currentSticker);
     redoStack = [];
     notifyChange();
@@ -290,7 +334,7 @@ canvas.addEventListener("mousemove", (e) => {
     if (tool.kind === "marker") {
       preview = new CirclePreview(e.offsetX, e.offsetY, tool.thickness / 2);
     } else {
-      preview = new StickerPreview(e.offsetX, e.offsetY, tool.emoji, 32);
+      preview = new StickerPreview(e.offsetX, e.offsetY, tool.emoji);
     }
     notifyToolMoved();
   }
@@ -309,11 +353,12 @@ canvas.addEventListener("mouseleave", () => {
   notifyToolMoved();
 });
 
-// ─── Clear / Undo / Redo Buttons ─────────────────────────────────
+// ─── Clear / Undo / Redo / Export Buttons ────────────────────────
 const actions = document.createElement("div");
 actions.id = "actions";
 
 const clearBtn = document.createElement("button");
+clearBtn.className = "action-button";
 clearBtn.textContent = "Clear";
 clearBtn.addEventListener("click", () => {
   displayList = [];
@@ -326,6 +371,7 @@ clearBtn.addEventListener("click", () => {
 actions.appendChild(clearBtn);
 
 const undoBtn = document.createElement("button");
+undoBtn.className = "action-button";
 undoBtn.textContent = "Undo";
 undoBtn.addEventListener("click", () => {
   if (displayList.length === 0) return;
@@ -336,6 +382,7 @@ undoBtn.addEventListener("click", () => {
 actions.appendChild(undoBtn);
 
 const redoBtn = document.createElement("button");
+redoBtn.className = "action-button";
 redoBtn.textContent = "Redo";
 redoBtn.addEventListener("click", () => {
   if (redoStack.length === 0) return;
@@ -345,21 +392,22 @@ redoBtn.addEventListener("click", () => {
 });
 actions.appendChild(redoBtn);
 
-container.appendChild(actions);
-
-// ─── High-Res Export ────────────────────────────
+// High-Res Export (scaled to current canvas)
 function exportHiResPNG() {
+  const scale = 4;
   const exportCanvas = document.createElement("canvas");
-  exportCanvas.width = 1024;
-  exportCanvas.height = 1024;
+  exportCanvas.width = canvas.width * scale;
+  exportCanvas.height = canvas.height * scale;
 
   const ex = exportCanvas.getContext("2d")!;
   ex.lineCap = "round";
-  ex.strokeStyle = "#ff0000";
   ex.fillStyle = "#ffffffff";
   ex.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
 
-  ex.scale(4, 4);
+  // current global stroke style (since strokes don't store color yet)
+  ex.strokeStyle = (ctx.strokeStyle as string) || "#000000";
+
+  ex.scale(scale, scale);
 
   // Replay only the committed items (no previews)
   for (const item of displayList) item.display(ex);
@@ -372,9 +420,15 @@ function exportHiResPNG() {
 }
 
 const exportBtn = document.createElement("button");
+exportBtn.className = "action-button";
 exportBtn.textContent = "Export PNG";
 exportBtn.addEventListener("click", exportHiResPNG);
 actions.appendChild(exportBtn);
+
+// Wrap Actions in a sidebar group
+const actionsPanel = makeGroup("Actions");
+actionsPanel.body.appendChild(actions);
+sidebar.appendChild(actionsPanel.group);
 
 // ─── Initial Draw ────────────────────────────────────────────────
 notifyChange();
