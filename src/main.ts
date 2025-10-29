@@ -23,20 +23,49 @@ toolbar.appendChild(thinBtn);
 toolbar.appendChild(thickBtn);
 container.appendChild(toolbar);
 
-// ─── Sticker Buttons ─────────────────────────────────────────────
+// ─── Sticker Bar (Data-driven) ───────────────────────────────────
 const stickerbar = document.createElement("div");
 stickerbar.id = "stickerbar";
-
-const stickers = ["⭐", "🌸", "🎈"];
-const stickerBtns: HTMLButtonElement[] = stickers.map((emoji) => {
-  const b = document.createElement("button");
-  b.className = "tool-button";
-  b.textContent = emoji;
-  stickerbar.appendChild(b);
-  return b;
-});
-
 toolbar.appendChild(stickerbar);
+
+let stickers: string[] = ["⭐", "🌸", "🎈"];
+
+let stickerBtns: HTMLButtonElement[] = [];
+
+function renderStickerbar() {
+  stickerbar.innerHTML = "";
+
+  // Build sticker buttons from data
+  stickerBtns = stickers.map((emoji) => {
+    const b = document.createElement("button");
+    b.className = "tool-button";
+    b.textContent = emoji;
+    b.addEventListener("click", () => selectSticker(emoji, b));
+    stickerbar.appendChild(b);
+    return b;
+  });
+
+  // "+ Add" custom sticker button
+  const addBtn = document.createElement("button");
+  addBtn.className = "tool-button";
+  addBtn.textContent = "+ Add";
+  addBtn.title = "Create a custom sticker";
+  addBtn.addEventListener("click", () => {
+    const text = prompt("Custom sticker text", "🧽");
+    if (text == null) return; // user cancelled
+    const value = text.trim();
+    if (!value) return; // ignore empty/whitespace
+    // Add to data and rebuild UI
+    stickers = [...stickers, value];
+    renderStickerbar();
+    // Auto-select the newly added sticker
+    const lastBtn = stickerBtns[stickerBtns.length - 1];
+    selectSticker(value, lastBtn);
+  });
+
+  stickerbar.appendChild(addBtn);
+}
+renderStickerbar();
 
 // ─── Tool State ──────────────────────────────────────────────────
 type Tool =
@@ -45,28 +74,31 @@ type Tool =
 
 let tool: Tool = { kind: "marker", thickness: 2 };
 
+function clearStickerSelections() {
+  stickerBtns.forEach((b) => b.classList.remove("selectedTool"));
+}
+
 function selectMarker(thickness: number, btn: HTMLButtonElement) {
   tool = { kind: "marker", thickness };
   thinBtn.classList.toggle("selectedTool", btn === thinBtn);
   thickBtn.classList.toggle("selectedTool", btn === thickBtn);
-  stickerBtns.forEach((b) => b.classList.remove("selectedTool"));
+  clearStickerSelections();
   preview = null;
+  notifyToolMoved();
+}
+
+function selectSticker(emoji: string, btn: HTMLButtonElement) {
+  tool = { kind: "sticker", emoji };
+  thinBtn.classList.remove("selectedTool");
+  thickBtn.classList.remove("selectedTool");
+  clearStickerSelections();
+  btn.classList.add("selectedTool");
+  // allow preview to show on next move
   notifyToolMoved();
 }
 
 thinBtn.addEventListener("click", () => selectMarker(2, thinBtn));
 thickBtn.addEventListener("click", () => selectMarker(8, thickBtn));
-
-stickerBtns.forEach((btn, i) => {
-  btn.addEventListener("click", () => {
-    tool = { kind: "sticker", emoji: stickers[i] };
-    thinBtn.classList.remove("selectedTool");
-    thickBtn.classList.remove("selectedTool");
-    stickerBtns.forEach((b) => b.classList.toggle("selectedTool", b === btn));
-    // fire tool-moved per spec (and allow a preview to appear on next move)
-    notifyToolMoved();
-  });
-});
 
 // ─── Canvas Setup ────────────────────────────────────────────────
 const canvas = document.createElement("canvas");
@@ -146,7 +178,7 @@ class CirclePreview implements Preview {
     ctx.beginPath();
     ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
     ctx.lineWidth = 1;
-    ctx.strokeStyle = "#666"; // subtle ring
+    ctx.strokeStyle = "#666";
     ctx.stroke();
     ctx.restore();
   }
