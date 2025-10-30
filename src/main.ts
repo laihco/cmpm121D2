@@ -5,7 +5,7 @@ document.title = "रंगोली";
 
 const container = document.createElement("div");
 container.id = "canvas-container";
-container.classList.add("app"); // ← retro app grid
+container.classList.add("app");
 document.body.appendChild(container);
 
 // Create left sidebar + right stage regions
@@ -51,7 +51,7 @@ sidebar.appendChild(toolsPanel.group);
 const stickerbar = document.createElement("div");
 stickerbar.id = "stickerbar";
 
-let stickers: string[] = ["🌸", "⭐", "🪄", "🌿", "💠", "🎈"]; // retro-ish starter set
+let stickers: string[] = ["🌸", "⭐", "🪄", "🌿", "💠", "🎈"];
 let stickerBtns: HTMLButtonElement[] = [];
 
 function renderStickerbar() {
@@ -62,7 +62,10 @@ function renderStickerbar() {
     const b = document.createElement("button");
     b.className = "tool-button";
     b.textContent = emoji;
-    b.addEventListener("click", () => selectSticker(emoji, b));
+    b.addEventListener(
+      "click",
+      () => selectSticker(emoji, b, /*randomize=*/ true),
+    );
     stickerbar.appendChild(b);
     return b;
   });
@@ -74,63 +77,27 @@ function renderStickerbar() {
   addBtn.title = "Create a custom sticker";
   addBtn.addEventListener("click", () => {
     const text = prompt("Custom sticker text", "🧽");
-    if (text == null) return; // user cancelled
+    if (text == null) return;
     const value = text.trim();
-    if (!value) return; // ignore empty/whitespace
-    // Add to data and rebuild UI
+    if (!value) return;
     stickers = [...stickers, value];
     renderStickerbar();
-    // Auto-select the newly added sticker
     const lastBtn = stickerBtns[stickerBtns.length - 1];
-    selectSticker(value, lastBtn);
+    selectSticker(value, lastBtn, /*randomize=*/ true);
   });
 
   stickerbar.appendChild(addBtn);
 }
 renderStickerbar();
 
-// Wrap Stickers in a sidebar group
 const stickersPanel = makeGroup("Stickers");
 stickersPanel.body.appendChild(stickerbar);
 sidebar.appendChild(stickersPanel.group);
 
-// ─── Tool State ──────────────────────────────────────────────────
-type Tool =
-  | { kind: "marker"; thickness: number }
-  | { kind: "sticker"; emoji: string };
-
-let tool: Tool = { kind: "marker", thickness: 2 };
-
-function clearStickerSelections() {
-  stickerBtns.forEach((b) => b.classList.remove("selectedTool"));
-}
-
-function selectMarker(thickness: number, btn: HTMLButtonElement) {
-  tool = { kind: "marker", thickness };
-  thinBtn.classList.toggle("selectedTool", btn === thinBtn);
-  thickBtn.classList.toggle("selectedTool", btn === thickBtn);
-  clearStickerSelections();
-  preview = null;
-  notifyToolMoved();
-}
-
-function selectSticker(emoji: string, btn: HTMLButtonElement) {
-  tool = { kind: "sticker", emoji };
-  thinBtn.classList.remove("selectedTool");
-  thickBtn.classList.remove("selectedTool");
-  clearStickerSelections();
-  btn.classList.add("selectedTool");
-  // allow preview to show on next move
-  notifyToolMoved();
-}
-
-thinBtn.addEventListener("click", () => selectMarker(4, thinBtn));   // tuned default
-thickBtn.addEventListener("click", () => selectMarker(14, thickBtn)); // tuned default
-
 // ─── Canvas Setup (goes into the stage on the right) ─────────────
 const canvas = document.createElement("canvas");
 canvas.id = "main-canvas";
-canvas.width = 512; // bigger drawing area
+canvas.width = 512;
 canvas.height = 512;
 stage.appendChild(canvas);
 
@@ -141,42 +108,189 @@ ctx.lineCap = "round";
 const colorbar = document.createElement("div");
 colorbar.id = "colorbar";
 
-// A retro-leaning palette
-const colors = [
-  "#000000", "#7f7f7f", "#ffffff",
-  "#ff0000", "#800000",
-  "#ffff00", "#808000",
-  "#00ff00", "#008000",
-  "#00ffff", "#008080",
-  "#0000ff", "#000080",
-  "#ff00ff", "#800080",
-  "#ffa500", "#804000",
-  "#a52a2a"
-];
-let currentColor = colors[0];
+// Utility: HSL → HEX for pretty hues
+function hslToHex(h: number, s = 72, l = 45) {
+  // s,l given in percent
+  s /= 100;
+  l /= 100;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  let [r, g, b] = [0, 0, 0];
 
-colors.forEach((c) => {
+  if (0 <= h && h < 60) [r, g, b] = [c, x, 0];
+  else if (60 <= h && h < 120) [r, g, b] = [x, c, 0];
+  else if (120 <= h && h < 180) [r, g, b] = [0, c, x];
+  else if (180 <= h && h < 240) [r, g, b] = [0, x, c];
+  else if (240 <= h && h < 300) [r, g, b] = [x, 0, c];
+  else [r, g, b] = [c, 0, x];
+
+  const toHex = (v: number) =>
+    Math.round((v + m) * 255)
+      .toString(16)
+      .padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+// A retro-leaning swatch palette (still supported)
+const swatchColors = [
+  "#000000",
+  "#7f7f7f",
+  "#ffffff",
+  "#ff0000",
+  "#800000",
+  "#ffff00",
+  "#808000",
+  "#00ff00",
+  "#008000",
+  "#00ffff",
+  "#008080",
+  "#0000ff",
+  "#000080",
+  "#ff00ff",
+  "#800080",
+  "#ffa500",
+  "#804000",
+  "#a52a2a",
+];
+
+// Current “queued” variations (used when you start the next action)
+let currentColor = swatchColors[0]; // marker color for NEXT stroke
+let queuedHueDeg: number | null = null; // precise hue via slider (if set)
+let queuedStickerDeg = 0; // precise rotation via slider
+
+// Build swatches (click = override with fixed color)
+swatchColors.forEach((c) => {
   const swatch = document.createElement("button");
   swatch.className = "color-swatch";
   swatch.style.backgroundColor = c;
   if (c === currentColor) swatch.classList.add("selectedColor");
   swatch.addEventListener("click", () => {
-    currentColor = c;
-    ctx.strokeStyle = c; // global style (old strokes recolor — same as your current behavior)
+    currentColor = c; // per-stroke color (does not recolor old strokes)
+    queuedHueDeg = null; // swatch overrides slider-chosen hue
     document
       .querySelectorAll(".color-swatch")
       .forEach((b) => b.classList.remove("selectedColor"));
     swatch.classList.add("selectedColor");
+    notifyToolMoved();
   });
   colorbar.appendChild(swatch);
 });
 
-// Wrap Colors in a sidebar group
 const colorsPanel = makeGroup("Colors");
 colorsPanel.body.appendChild(colorbar);
 sidebar.appendChild(colorsPanel.group);
 
-ctx.strokeStyle = currentColor;
+// ─── Tool State ──────────────────────────────────────────────────
+type Tool =
+  | { kind: "marker"; thickness: number }
+  | { kind: "sticker"; emoji: string };
+
+let tool: Tool = { kind: "marker", thickness: 2 };
+
+// ─── “Variation” UI (Randomize + Slider) ─────────────────────────
+// One slider that means: Hue (marker) OR Rotation (sticker)
+const variationWrap = document.createElement("div");
+variationWrap.id = "variation";
+
+const sliderLabel = document.createElement("label");
+sliderLabel.textContent = "Hue / Rotation";
+
+const slider = document.createElement("input");
+slider.type = "range";
+slider.min = "0";
+slider.max = "360";
+slider.value = "0";
+slider.step = "1";
+slider.addEventListener("input", () => {
+  if (tool.kind === "marker") {
+    queuedHueDeg = Number(slider.value);
+    currentColor = hslToHex(queuedHueDeg);
+    syncSwatchSelectionToCurrentColor();
+  } else {
+    queuedStickerDeg = Number(slider.value);
+  }
+  notifyToolMoved(); // updates preview with new hue/angle
+});
+
+// Small preview chip for “next” variation
+const nextPreview = document.createElement("div");
+nextPreview.style.display = "flex";
+nextPreview.style.alignItems = "center";
+nextPreview.style.gap = "8px";
+const chip = document.createElement("div");
+chip.style.width = "18px";
+chip.style.height = "18px";
+chip.style.borderRadius = "50%";
+chip.style.border = "1px solid #999";
+const chipText = document.createElement("span");
+chipText.style.fontSize = "12px";
+chipText.style.opacity = "0.8";
+nextPreview.appendChild(chip);
+nextPreview.appendChild(chipText);
+
+// “Randomize” behavior happens automatically when you click a tool button,
+// but we also expose a manual randomize button for convenience.
+const randomizeBtn = document.createElement("button");
+randomizeBtn.className = "action-button";
+randomizeBtn.textContent = "Randomize";
+randomizeBtn.addEventListener("click", () => {
+  randomizeVariationForCurrentTool();
+  notifyToolMoved();
+});
+
+variationWrap.appendChild(sliderLabel);
+variationWrap.appendChild(slider);
+variationWrap.appendChild(nextPreview);
+variationWrap.appendChild(randomizeBtn);
+
+const variationPanel = makeGroup("Tool Variations");
+variationPanel.body.appendChild(variationWrap);
+sidebar.appendChild(variationPanel.group);
+
+// Helpers for randomization
+function randomHueDeg() {
+  return Math.floor(Math.random() * 360);
+}
+function randomAngleDeg(range = 25) {
+  // small tilt for stickers
+  return Math.floor((Math.random() * 2 - 1) * range);
+}
+function randomizeVariationForCurrentTool() {
+  if (tool.kind === "marker") {
+    queuedHueDeg = randomHueDeg();
+    currentColor = hslToHex(queuedHueDeg);
+    slider.value = String(queuedHueDeg);
+    syncSwatchSelectionToCurrentColor();
+  } else {
+    queuedStickerDeg = randomAngleDeg();
+    slider.value = String(queuedStickerDeg);
+  }
+}
+
+// Keep the swatch highlight if the color is in swatches; otherwise clear all
+function syncSwatchSelectionToCurrentColor() {
+  const buttons = Array.from(
+    document.querySelectorAll<HTMLButtonElement>(".color-swatch"),
+  );
+  let matched = false;
+  for (const b of buttons) {
+    const bg = (b.style.backgroundColor || "").toLowerCase();
+    // Compute the hex string from style; easiest is to compare via a temp element
+    const temp = document.createElement("div");
+    temp.style.color = currentColor;
+    document.body.appendChild(temp);
+    const wanted = getComputedStyle(temp).color; // rgb(...)
+    document.body.removeChild(temp);
+    const isMatch = getComputedStyle(b).backgroundColor === wanted;
+    b.classList.toggle("selectedColor", isMatch);
+    if (isMatch) matched = true;
+  }
+  if (!matched) {
+    buttons.forEach((b) => b.classList.remove("selectedColor"));
+  }
+  updateChip();
+}
 
 // ─── Drawing Commands ────────────────────────────────────────────
 type Point = { x: number; y: number };
@@ -187,7 +301,11 @@ interface Drawable {
 
 class Stroke implements Drawable {
   private points: Point[] = [];
-  constructor(private width: number, initial?: Point) {
+  constructor(
+    private width: number,
+    private color: string,
+    initial?: Point,
+  ) {
     if (initial) this.points.push(initial);
   }
   drag(x: number, y: number) {
@@ -197,6 +315,7 @@ class Stroke implements Drawable {
     if (this.points.length < 2) return;
     ctx.save();
     ctx.lineWidth = this.width;
+    ctx.strokeStyle = this.color; // ← each stroke remembers its own color
     ctx.beginPath();
     ctx.moveTo(this.points[0].x, this.points[0].y);
     for (let i = 1; i < this.points.length; i++) {
@@ -213,17 +332,17 @@ class Sticker implements Drawable {
     public x: number,
     public y: number,
     public emoji: string,
-    public size = Math.round(canvas.width * 0.085), // scale with canvas for nicer feel
-    public angle = 0,
+    public size = Math.round(canvas.width * 0.085),
+    public angleRad = 0,
   ) {}
   drag(x: number, y: number) {
     this.x = x;
-    this.y = y; // reposition, not a path
+    this.y = y;
   }
   display(ctx: CanvasRenderingContext2D) {
     ctx.save();
     ctx.translate(this.x, this.y);
-    if (this.angle) ctx.rotate(this.angle);
+    if (this.angleRad) ctx.rotate(this.angleRad);
     ctx.font =
       `${this.size}px system-ui, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif`;
     ctx.textAlign = "center";
@@ -239,13 +358,18 @@ interface Preview {
 }
 
 class CirclePreview implements Preview {
-  constructor(public x: number, public y: number, public radius: number) {}
+  constructor(
+    public x: number,
+    public y: number,
+    public radius: number,
+    public color: string,
+  ) {}
   draw(ctx: CanvasRenderingContext2D) {
     ctx.save();
     ctx.beginPath();
     ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = "#666";
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = this.color;
     ctx.stroke();
     ctx.restore();
   }
@@ -257,15 +381,18 @@ class StickerPreview implements Preview {
     public y: number,
     public emoji: string,
     public size = Math.round(canvas.width * 0.085),
+    public angleRad = 0,
   ) {}
   draw(ctx: CanvasRenderingContext2D) {
     ctx.save();
     ctx.globalAlpha = 0.6;
+    ctx.translate(this.x, this.y);
+    if (this.angleRad) ctx.rotate(this.angleRad);
     ctx.font =
       `${this.size}px system-ui, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(this.emoji, this.x, this.y);
+    ctx.fillText(this.emoji, 0, 0);
     ctx.restore();
   }
 }
@@ -285,6 +412,7 @@ function renderAll() {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   for (const item of displayList) item.display(ctx);
   if (!currentStroke && !currentSticker && preview) preview.draw(ctx);
+  updateChip();
 }
 
 canvas.addEventListener("drawing-changed", renderAll);
@@ -301,12 +429,25 @@ function notifyToolMoved() {
 canvas.addEventListener("mousedown", (e) => {
   preview = null; // hide preview while drawing/placing
   if (tool.kind === "marker") {
-    currentStroke = new Stroke(tool.thickness, { x: e.offsetX, y: e.offsetY });
+    // Use the currently queued color
+    currentStroke = new Stroke(
+      tool.thickness,
+      currentColor,
+      { x: e.offsetX, y: e.offsetY },
+    );
     displayList.push(currentStroke);
     redoStack = [];
     notifyChange();
   } else {
-    currentSticker = new Sticker(e.offsetX, e.offsetY, tool.emoji);
+    // Use the currently queued rotation (deg → rad)
+    const rad = (queuedStickerDeg * Math.PI) / 180;
+    currentSticker = new Sticker(
+      e.offsetX,
+      e.offsetY,
+      tool.emoji,
+      undefined,
+      rad,
+    );
     displayList.push(currentSticker);
     redoStack = [];
     notifyChange();
@@ -323,9 +464,21 @@ canvas.addEventListener("mousemove", (e) => {
   } else {
     // Update preview for current tool
     if (tool.kind === "marker") {
-      preview = new CirclePreview(e.offsetX, e.offsetY, tool.thickness / 2);
+      preview = new CirclePreview(
+        e.offsetX,
+        e.offsetY,
+        tool.thickness / 2,
+        currentColor,
+      );
     } else {
-      preview = new StickerPreview(e.offsetX, e.offsetY, tool.emoji);
+      const rad = (queuedStickerDeg * Math.PI) / 180;
+      preview = new StickerPreview(
+        e.offsetX,
+        e.offsetY,
+        tool.emoji,
+        undefined,
+        rad,
+      );
     }
     notifyToolMoved();
   }
@@ -394,16 +547,11 @@ function exportHiResPNG() {
   ex.lineCap = "round";
   ex.fillStyle = "#ffffffff";
   ex.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
-
-  // current global stroke style (since strokes don't store color yet)
-  ex.strokeStyle = (ctx.strokeStyle as string) || "#000000";
-
   ex.scale(scale, scale);
 
-  // Replay only the committed items (no previews)
+  // Replay items; each Stroke/Sticker handles its own style/rotation
   for (const item of displayList) item.display(ex);
 
-  // Trigger download
   const anchor = document.createElement("a");
   anchor.href = exportCanvas.toDataURL("image/png");
   anchor.download = "sketchpad.png";
@@ -416,10 +564,76 @@ exportBtn.textContent = "Export PNG";
 exportBtn.addEventListener("click", exportHiResPNG);
 actions.appendChild(exportBtn);
 
-// Wrap Actions in a sidebar group
 const actionsPanel = makeGroup("Actions");
 actionsPanel.body.appendChild(actions);
 sidebar.appendChild(actionsPanel.group);
 
+// ─── Tool Selection (with automatic randomization) ───────────────
+function clearStickerSelections() {
+  stickerBtns.forEach((b) => b.classList.remove("selectedTool"));
+}
+
+function selectMarker(
+  thickness: number,
+  btn: HTMLButtonElement,
+  randomize = false,
+) {
+  tool = { kind: "marker", thickness };
+  thinBtn.classList.toggle("selectedTool", btn === thinBtn);
+  thickBtn.classList.toggle("selectedTool", btn === thickBtn);
+  clearStickerSelections();
+
+  if (randomize) {
+    // Randomize hue for NEXT stroke
+    queuedHueDeg = randomHueDeg();
+    currentColor = hslToHex(queuedHueDeg);
+    slider.value = String(queuedHueDeg);
+    syncSwatchSelectionToCurrentColor();
+  }
+  preview = null;
+  notifyToolMoved();
+}
+
+function selectSticker(
+  emoji: string,
+  btn: HTMLButtonElement,
+  randomize = false,
+) {
+  tool = { kind: "sticker", emoji };
+  thinBtn.classList.remove("selectedTool");
+  thickBtn.classList.remove("selectedTool");
+  clearStickerSelections();
+  btn.classList.add("selectedTool");
+
+  if (randomize) {
+    // Randomize rotation for NEXT placement
+    queuedStickerDeg = randomAngleDeg();
+    slider.value = String(queuedStickerDeg);
+  }
+  notifyToolMoved();
+}
+
+thinBtn.addEventListener(
+  "click",
+  () => selectMarker(4, thinBtn, /*randomize=*/ true),
+);
+thickBtn.addEventListener(
+  "click",
+  () => selectMarker(14, thickBtn, /*randomize=*/ true),
+);
+
 // ─── Initial Draw ────────────────────────────────────────────────
+function updateChip() {
+  // chip shows next marker color OR next sticker rotation
+  if (tool.kind === "marker") {
+    chip.style.backgroundColor = currentColor;
+    chipText.textContent = `Hue ${
+      queuedHueDeg == null ? "—" : Math.round(queuedHueDeg)
+    }°`;
+  } else {
+    chip.style.backgroundColor = "#fff";
+    chipText.textContent = `Rotate ${Math.round(queuedStickerDeg)}°`;
+  }
+}
+
 notifyChange();
