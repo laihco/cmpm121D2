@@ -275,7 +275,6 @@ function syncSwatchSelectionToCurrentColor() {
   );
   let matched = false;
   for (const b of buttons) {
-    const bg = (b.style.backgroundColor || "").toLowerCase();
     // Compute the hex string from style; easiest is to compare via a temp element
     const temp = document.createElement("div");
     temp.style.color = currentColor;
